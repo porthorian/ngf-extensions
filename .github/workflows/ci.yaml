@@ -29,12 +29,17 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
       - name: Check package version
         id: version
         run: |
           VERSION=$(awk '/^version:/ { print $2 }' chart/Chart.yaml)
           if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF" != "refs/tags/v$VERSION" ]]; then
             echo "Git tag must match chart version $VERSION" >&2
+            exit 1
+          fi
+          if helm show chart oci://ghcr.io/porthorian/charts/ngf-extensions --version "$VERSION" > /dev/null 2>&1; then
+            echo "Chart version $VERSION already exists; bump it before publishing" >&2
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -50,7 +55,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/porthorian/ngf-extensions:${{ steps.version.outputs.version }},ghcr.io/porthorian/ngf-extensions:sha-${{ github.sha }}
-      - uses: azure/setup-helm@v4
       - name: Push OCI chart
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
