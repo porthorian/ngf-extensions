@@ -2,6 +2,8 @@
 {{- $v := .Values.timedBan -}}
 {{- $name := include "ngf-extensions.timedBanName" . -}}
 {{- $allowlist := include "ngf-extensions.allowlistName" . -}}
+{{- $state := include "ngf-extensions.stateName" . -}}
+{{- $policy := include "ngf-extensions.policyName" . -}}
 {{- $_ := required "timedBan.gatewayName is required" $v.gatewayName -}}
 {{- $_ := required "timedBan.targetHost is required" $v.targetHost -}}
 {{- if not (hasPrefix "/" $v.pathPrefix) -}}{{- fail "timedBan.pathPrefix must start with /" -}}{{- end -}}
@@ -46,14 +48,14 @@ rules:
     verbs: [get]
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [{{ $v.stateConfigMap | quote }}]
+    resourceNames: [{{ $state | quote }}]
     verbs: [get, update]
   - apiGroups: [gateway.nginx.org]
     resources: [snippetspolicies]
     verbs: [create]
   - apiGroups: [gateway.nginx.org]
     resources: [snippetspolicies]
-    resourceNames: [{{ $v.policyName | quote }}]
+    resourceNames: [{{ $policy | quote }}]
     verbs: [get, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -125,9 +127,9 @@ spec:
             - name: NGF_ALLOWLIST_CONFIGMAP
               value: {{ $allowlist | quote }}
             - name: NGF_STATE_CONFIGMAP
-              value: {{ $v.stateConfigMap | quote }}
+              value: {{ $state | quote }}
             - name: NGF_POLICY_NAME
-              value: {{ $v.policyName | quote }}
+              value: {{ $policy | quote }}
             - name: NGF_AUTH_THRESHOLD
               value: {{ $v.authThreshold | quote }}
             - name: NGF_AUTH_WINDOW

@@ -7,11 +7,11 @@ timedBan:
   allowlist:
     existingConfigMap: ""
     cidrs: []
-  stateConfigMap: ngf-extensions-timed-ban-state
-  policyName: ngf-extensions-timed-bans
+  stateConfigMap: ""
+  policyName: ""
   image:
     repository: ghcr.io/porthorian/ngf-extensions
-    tag: 0.1.0-rc.2
+    tag: 0.1.0-rc.3
     digest: ""
     pullPolicy: IfNotPresent
     pullSecrets: []
