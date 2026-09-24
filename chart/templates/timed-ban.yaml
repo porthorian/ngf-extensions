@@ -1,0 +1,183 @@
+{{- if .Values.timedBan.enabled -}}
+{{- $v := .Values.timedBan -}}
+{{- $name := include "ngf-extensions.timedBanName" . -}}
+{{- $allowlist := include "ngf-extensions.allowlistName" . -}}
+{{- $state := include "ngf-extensions.stateName" . -}}
+{{- $policy := include "ngf-extensions.policyName" . -}}
+{{- $_ := required "timedBan.gatewayName is required" $v.gatewayName -}}
+{{- $_ := required "timedBan.targetHost is required" $v.targetHost -}}
+{{- if not (hasPrefix "/" $v.pathPrefix) -}}{{- fail "timedBan.pathPrefix must start with /" -}}{{- end -}}
+{{- if gt (int $v.maxActiveBans) 200 -}}{{- fail "timedBan.maxActiveBans must not exceed 200" -}}{{- end -}}
+{{- if not $v.allowlist.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $allowlist }}
+  namespace: {{ .Release.Namespace }}
+data:
+  allow-cidrs: |-
+    {{- range $v.allowlist.cidrs }}
+    {{ . }}
+    {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $allowlist | quote }}]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $state | quote }}]
+    verbs: [get, update]
+  - apiGroups: [gateway.nginx.org]
+    resources: [snippetspolicies]
+    verbs: [create]
+  - apiGroups: [gateway.nginx.org]
+    resources: [snippetspolicies]
+    resourceNames: [{{ $policy | quote }}]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with $v.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: timed-ban-controller
+          image: {{ include "ngf-extensions.image" . | quote }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          args: [timed-ban-controller]
+          env:
+            - name: NGF_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NGF_GATEWAY_NAME
+              value: {{ $v.gatewayName | quote }}
+            - name: NGF_TARGET_HOST
+              value: {{ $v.targetHost | quote }}
+            - name: NGF_PATH_PREFIX
+              value: {{ $v.pathPrefix | quote }}
+            - name: NGF_ALLOWLIST_CONFIGMAP
+              value: {{ $allowlist | quote }}
+            - name: NGF_STATE_CONFIGMAP
+              value: {{ $state | quote }}
+            - name: NGF_POLICY_NAME
+              value: {{ $policy | quote }}
+            - name: NGF_AUTH_THRESHOLD
+              value: {{ $v.authThreshold | quote }}
+            - name: NGF_AUTH_WINDOW
+              value: {{ $v.authWindow | quote }}
+            - name: NGF_RATE_THRESHOLD
+              value: {{ $v.rateThreshold | quote }}
+            - name: NGF_RATE_WINDOW
+              value: {{ $v.rateWindow | quote }}
+            - name: NGF_BAN_DURATION
+              value: {{ $v.banDuration | quote }}
+            - name: NGF_RECONCILE_INTERVAL
+              value: {{ $v.reconcileInterval | quote }}
+            - name: NGF_MAX_ACTIVE_BANS
+              value: {{ $v.maxActiveBans | quote }}
+          ports:
+            - name: metrics
+              containerPort: 9090
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 10
+{{- if $v.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $v.podMonitor.interval }}
+{{- end }}
+{{- end }}

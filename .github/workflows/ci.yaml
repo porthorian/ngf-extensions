@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, vm/timed-ban-controller]
+    tags: ['v*']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test ./... && go test -race ./... && go vet ./...
+      - uses: azure/setup-helm@v4
+      - run: helm lint chart && helm template test chart --namespace gateway-system --set timedBan.enabled=true --set timedBan.gatewayName=public-gateway --set timedBan.targetHost=api.example.com > /dev/null
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/vm/timed-ban-controller' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+      - name: Check package version
+        id: version
+        run: |
+          VERSION=$(awk '/^version:/ { print $2 }' chart/Chart.yaml)
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF" != "refs/tags/v$VERSION" ]]; then
+            echo "Git tag must match chart version $VERSION" >&2
+            exit 1
+          fi
+          if helm show chart oci://ghcr.io/porthorian/charts/ngf-extensions --version "$VERSION" > /dev/null 2>&1; then
+            echo "Chart version $VERSION already exists; bump it before publishing" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/porthorian/ngf-extensions:${{ steps.version.outputs.version }},ghcr.io/porthorian/ngf-extensions:sha-${{ github.sha }}
+      - name: Push OCI chart
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm package chart --destination /tmp
+          helm push /tmp/ngf-extensions-${{ steps.version.outputs.version }}.tgz oci://ghcr.io/porthorian/charts

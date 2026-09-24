@@ -1,0 +1,36 @@
+timedBan:
+  enabled: false
+  nameOverride: ""
+  gatewayName: ""
+  targetHost: ""
+  pathPrefix: /v1
+  allowlist:
+    existingConfigMap: ""
+    cidrs: []
+  stateConfigMap: ""
+  policyName: ""
+  image:
+    repository: ghcr.io/porthorian/ngf-extensions
+    tag: 0.1.0-rc.3
+    digest: ""
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  authThreshold: 120
+  authWindow: 5m
+  rateThreshold: 30
+  rateWindow: 1m
+  banDuration: 15m
+  reconcileInterval: 30s
+  maxActiveBans: 200
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  podMonitor:
+    enabled: true
+    interval: 30s
